@@ -18,9 +18,9 @@ def proccess_request(sock, cache):
     name, _ = get_name(data)
     qtype = other_data_before[-8: -4]
     cached_result = None
-    if (name, qtype) in my_cache:
+    if (name, qtype) in cache:
         response = binascii.hexlify(
-            my_cache[(name, qtype)]).decode("utf-8")
+            cache[(name, qtype)]).decode("utf-8")
         response = data[:4] + response[4:]
         cached_result = binascii.unhexlify(response)
 
@@ -36,9 +36,7 @@ def proccess_request(sock, cache):
             except:
                 result = None
             else:
-                parse_response(binascii.hexlify(
-                    response_from_server).decode("utf-8"), cache)
-                my_cache[(name, qtype)] = response_from_server
+                cache[(name, qtype)] = response_from_server
                 result = response_from_server
     else:
         print('From cash')
@@ -47,25 +45,32 @@ def proccess_request(sock, cache):
         sock.sendto(result, addr)
 
 
-def parse_response(data, cache):
+def get_records(data):
     header, body = data[:header_len], data[header_len:]
     name, offset = get_name(data)
-    msg_type = body[offset: offset + 4]
     (ANCOUNT, NSCOUNT, ARCOUNT) = (
         get_bytes_as_int(header, pos, bytes_count=2) for pos in [12, 16, 20])
     count_records = [ANCOUNT, NSCOUNT, ARCOUNT]
     resource_record = body[offset + 8:]
 
+    records = {}
     for i in count_records:
         try:
             record_and_name = parse_record(i, data, resource_record)
+            records[i] = record_and_name
             resource_record = resource_record[24 + int(resource_record[20:24], 16) * 2:]
         except:
             break
 
+    return records
+
+
+def cache_records(records: dict, cache):
+    for (_, record_and_name) in records:
         for record, name in record_and_name:
             if (name, record.msg_type) not in cache.keys():
-                cache[(name, msg_type)] = [record_and_name]
+                cache[(name, record.msg_type)] = [record_and_name]
+
 
 
 def parse_record(count, data, section):
@@ -109,7 +114,7 @@ def run():
 
     while True:
         try:
-            proccess_request(sock, cache)
+            proccess_request(sock, my_cache)
         except KeyboardInterrupt:
             user_answer = -1
             while user_answer != 'Y' and user_answer != 'N':
