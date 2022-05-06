@@ -14,15 +14,11 @@ my_cache = {}
 def proccess_request(sock, cache):
     data, addr = sock.recvfrom(4096)
     data = binascii.hexlify(data).decode("utf-8")
-    header, other_data_before = data[:header_len], data[header_len:]
     name, _ = get_name(data)
-    qtype = other_data_before[-8: -4]
-    cached_result = None
-    if (name, qtype) in cache:
-        response = binascii.hexlify(
-            cache[(name, qtype)]).decode("utf-8")
-        response = data[:4] + response[4:]
-        cached_result = binascii.unhexlify(response)
+
+    cached_result = get_from_cache(data, cache)
+    if cached_result is not None:
+        cached_result = binascii.unhexlify(cached_result)
 
     if cached_result is None:
         print('From server')
@@ -36,7 +32,10 @@ def proccess_request(sock, cache):
             except:
                 result = None
             else:
-                cache[(name, qtype)] = response_from_server
+                data2 = binascii.hexlify(
+                    response_from_server).decode("utf-8")
+                records = get_records(data2)
+                cache_records(records, cache)
                 result = response_from_server
     else:
         print('From cash')
@@ -50,27 +49,24 @@ def get_records(data):
     name, offset = get_name(data)
     (ANCOUNT, NSCOUNT, ARCOUNT) = (
         get_bytes_as_int(header, pos, bytes_count=2) for pos in [12, 16, 20])
-    count_records = [ANCOUNT, NSCOUNT, ARCOUNT]
     resource_record = body[offset + 8:]
 
-    records = {}
-    for i in count_records:
-        try:
-            record_and_name = parse_record(i, data, resource_record)
-            records[i] = record_and_name
-            resource_record = resource_record[24 + int(resource_record[20:24], 16) * 2:]
-        except:
-            break
+    records = [[], [], []]
+    for (i, value) in enumerate([ANCOUNT, NSCOUNT, ARCOUNT]):
+        if value == 0:
+            continue
+        record_and_name = parse_record(value, data, resource_record)
+        records[i] = record_and_name
+        resource_record = resource_record[24 + int(resource_record[20:24], 16) * 2:]
 
     return records
 
 
 def cache_records(records: dict, cache):
-    for (_, record_and_name) in records:
+    for record_and_name in records:
         for record, name in record_and_name:
-            if (name, record.msg_type) not in cache.keys():
-                cache[(name, record.msg_type)] = [record_and_name]
-
+            if (name, record.msg_type) not in cache:
+                cache[(name, record.msg_type)] = record_and_name
 
 
 def parse_record(count, data, section):
@@ -94,15 +90,14 @@ def get_from_cache(data, cache):
 
     if (name, qtype) in cache.keys():
         records = []
-        for record in cache[(name, qtype)]:
+        for (record, name) in cache[(name, qtype)]:
             format_answer = record.stringify()
             if record.ttl > int(round(time())):
                 records.append(format_answer)
         count = len(records)
 
         if count != 0:
-            return (header[:4] + "8180"
-                    + header[8:12] + hex(count)[2:].rjust(4, '0')
+            return (header[:4] + "8180" + header[8:12] + hex(count)[2:].rjust(4, '0')
                     + header[16:] + other_data_before + ''.join(records))
     return None
 
