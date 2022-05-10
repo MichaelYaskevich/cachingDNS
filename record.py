@@ -13,6 +13,9 @@ class Record:
     def get_ttl(self) -> str:
         return hex(self.ttl - int(round(time())))[2:].rjust(8, '0')
 
+    def get_data(self):
+        return self.data
+
     def stringify(self):
         return ('c00c' + self.msg_type +
                 '0001' + self.get_ttl()

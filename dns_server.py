@@ -1,9 +1,8 @@
 import binascii
 import socket
-from time import time
 import pickle
 
-from record import Record
+from DnsResponsePackage import DnsResponsePackage
 from help_methods import *
 
 byte_len = 2
@@ -15,10 +14,7 @@ def process_request(sock, cache):
     data, addr = sock.recvfrom(4096)
     data = binascii.hexlify(data).decode("utf-8")
     name, _ = get_name(data)
-
     cached_result = get_from_cache(data, cache)
-    if cached_result is not None:
-        cached_result = binascii.unhexlify(cached_result)
 
     if cached_result is None:
         print('From server')
@@ -32,10 +28,11 @@ def process_request(sock, cache):
             except:
                 result = None
             else:
-                data2 = binascii.hexlify(
-                    response_from_server).decode("utf-8")
-                records = get_records(data2)
-                cache_records(records, cache)
+                package = DnsResponsePackage(response_from_server)
+                with open("parsed_responses.txt", 'a') as f:
+                    f.write(package.get_all_info())
+                    f.write('--------------------------------------')
+                cache_records(package, cache)
                 result = response_from_server
     else:
         print('From cash')
@@ -44,61 +41,17 @@ def process_request(sock, cache):
         sock.sendto(result, addr)
 
 
-def get_records(data):
-    header, body = data[:header_len], data[header_len:]
-    name, offset = get_name(data)
-    (ANCOUNT, NSCOUNT, ARCOUNT) = (
-        get_bytes_as_int(header, pos, bytes_count=2) for pos in [12, 16, 20])
-    resource_record = body[offset + 8:]
-
-    records = [[], [], []]
-    for (i, value) in enumerate([ANCOUNT, NSCOUNT, ARCOUNT]):
-        if value == 0:
-            continue
-        record_and_name = parse_record(value, data, resource_record)
-        records[i] = record_and_name
-        resource_record = resource_record[24 + int(resource_record[20:24], 16) * 2:]
-
-    return records
-
-
-def cache_records(records: dict, cache):
-    for record_and_name in records:
-        for record, name in record_and_name:
-            if (name, record.msg_type) not in cache:
-                cache[(name, record.msg_type)] = record_and_name
-
-
-def parse_record(count, data, section):
-    result = []
-    for i in range(count):
-        start_of_name = int(section[2:4], 16) * byte_len
-        name, _ = get_name(data[start_of_name:], 0)
-
-        ttl = section[12:20]
-        msg_type = section[4:8]
-
-        record_data = section[24:24 + int(section[20:24], 16) * 2]
-        result.append((Record(record_data, msg_type, ttl), name))
-    return result
+def cache_records(package, cache):
+    cache[(package.get_name(), package.get_type())] = package.get_data_in_bytes()
 
 
 def get_from_cache(data, cache):
     header, other_data_before = data[:header_len], data[header_len:]
     name, _ = get_name(data)
-    qtype = other_data_before[-8: -4]
+    type = other_data_before[-8: -4]
 
-    if (name, qtype) in cache.keys():
-        records = []
-        for (record, name) in cache[(name, qtype)]:
-            format_answer = record.stringify()
-            if record.ttl > int(round(time())):
-                records.append(format_answer)
-        count = len(records)
-
-        if count != 0:
-            return (header[:4] + "8180" + header[8:12] + hex(count)[2:].rjust(4, '0')
-                    + header[16:] + other_data_before + ''.join(records))
+    if (name, type) in cache:
+        return binascii.unhexlify(header[:4]) + cache[(name, type)][2:]
     return None
 
 

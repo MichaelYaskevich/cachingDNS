@@ -6,5 +6,11 @@ class Test(unittest.TestCase):
     def test1(self):
         response = b'\x00\x11\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00\x02\x79\x61\x02\x72\x75\x00\x00\x01\x00\x01\xc0\x0c\x00\x01\x00\x01\x00\x00\x01\x8d\x00\x04\x57\xfa\xfa\xf2'
         d = {}
-        parse_response(binascii.hexlify(
-            response).decode("utf-8"), d)
+        # parse_response(binascii.hexlify(
+        #     response).decode("utf-8"), d)
+
+    def test2(self):
+        response = b'\x00\x11\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00\x02\x79\x61\x02\x72\x75\x00\x00\x01\x00\x01\xc0\x0c\x00\x01\x00\x01\x00\x00\x01\x8d\x00\x04\x57\xfa\xfa\xf2'
+        package = DnsResponsePackage(response)
+        with open("parsed_responses.txt", 'w') as f:
+            f.write(package.get_all_info())
