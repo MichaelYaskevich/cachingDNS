@@ -1,5 +1,7 @@
 import binascii
 import struct
+from time import time
+
 from help_methods import *
 
 
@@ -26,6 +28,8 @@ class DnsResponsePackage:
         qname, offset = get_name(self._data_as_str)
         qtype = self._body_as_str[offset: offset + 4]
         qclass = self._body_as_str[offset + 4: offset + 8]
+
+        self._question_as_str = self._body_as_str[:offset + 8]
 
         return qname, qtype, qclass
 
@@ -72,6 +76,22 @@ class DnsResponsePackage:
     def get_data_as_str(self):
         return self._data_as_str
 
+    def update_records(self):
+        records = []
+        for i in range(3):
+            records_to_delete = []
+            for j in range(len(self._records[i])):
+                record, name = self._records[i][j]
+                record_as_str = record.stringify()
+                if record.ttl > int(round(time())):
+                    records.append(record_as_str)
+                else:
+                    records_to_delete.append(self._records[i][j])
+            for rec in records_to_delete:
+                self._records[i].remove(rec)
+        self._data_as_str = self._header_as_str + self._question_as_str + ''.join(records)
+        self._data_in_bytes = binascii.unhexlify(self._data_as_str)
+
     def get_data_in_bytes(self):
         return self._data_in_bytes
 
@@ -79,7 +99,7 @@ class DnsResponsePackage:
         return self._header_as_str
 
     def get_body_as_str(self):
-        return self._body_as_str
+        return self._data_as_str[:24]
 
     def get_ID(self):
         return self._ID

@@ -55,7 +55,7 @@ def process_request(sock, cache):
 
 
 def cache_records(package, cache):
-    cache[(package.get_name(), package.get_type())] = package.get_data_in_bytes()
+    cache[(package.get_name(), package.get_type())] = package
 
 
 def get_from_cache(data, cache):
@@ -64,8 +64,20 @@ def get_from_cache(data, cache):
     type = other_data_before[-8: -4]
 
     if (name, type) in cache:
-        return binascii.unhexlify(header[:4]) + cache[(name, type)][2:]
+        package: DnsResponsePackage = cache[(name, type)]
+        return binascii.unhexlify(header[:4]) + package.get_data_in_bytes()[2:]
     return None
+
+
+def update_cache(cache : dict):
+    keys_to_delete = []
+    for (key, value) in cache.items():
+        value.update_records()
+        recs = value.get_records()
+        if len(recs[0]) + len(recs[1]) + len(recs[2]) == 0:
+            keys_to_delete.append(key)
+    for key in keys_to_delete:
+        del cache[key]
 
 
 def run():
@@ -76,6 +88,7 @@ def run():
     print('Server launched on 127.0.0.1: 53')
 
     while True:
+        update_cache(my_cache)
         try:
             process_request(sock, my_cache)
         except KeyboardInterrupt:
