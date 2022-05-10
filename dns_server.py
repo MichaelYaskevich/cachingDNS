@@ -7,7 +7,20 @@ from help_methods import *
 
 byte_len = 2
 header_len = 24
-my_cache = {}
+
+
+def dump_cache(cache):
+    with open('cache', 'wb') as f:
+        pickle.dump(cache, f)
+
+
+def load_cache():
+    try:
+        with open('cache', 'rb+') as f:
+            cache = pickle.load(f)
+            return cache
+    except FileNotFoundError:
+        return {}
 
 
 def process_request(sock, cache):
@@ -56,6 +69,8 @@ def get_from_cache(data, cache):
 
 
 def run():
+    my_cache = load_cache()
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('localhost', 53))
     print('Server launched on 127.0.0.1: 53')
@@ -66,10 +81,12 @@ def run():
         except KeyboardInterrupt:
             user_answer = -1
             while user_answer != 'Y' and user_answer != 'N':
-                user_answer = str(input('Shut down server?[Y/N]'))
+                print('Shut down server?[Y/N]')
+                user_answer = str(input())
             if user_answer == 'N':
                 continue
             if user_answer == 'Y':
+                dump_cache(my_cache)
                 exit(0)
 
 
