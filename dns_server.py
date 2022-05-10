@@ -11,7 +11,7 @@ header_len = 24
 my_cache = {}
 
 
-def proccess_request(sock, cache):
+def process_request(sock, cache):
     data, addr = sock.recvfrom(4096)
     data = binascii.hexlify(data).decode("utf-8")
     name, _ = get_name(data)
@@ -109,7 +109,7 @@ def run():
 
     while True:
         try:
-            proccess_request(sock, my_cache)
+            process_request(sock, my_cache)
         except KeyboardInterrupt:
             user_answer = -1
             while user_answer != 'Y' and user_answer != 'N':
