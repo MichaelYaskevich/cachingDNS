@@ -7,6 +7,10 @@ from help_methods import *
 
 byte_len = 2
 header_len = 24
+port = 53
+server = "8.8.8.8"
+bufsize = 4096
+encoding = "utf-8"
 
 
 def dump_cache(cache):
@@ -24,34 +28,42 @@ def load_cache():
 
 
 def process_request(sock, cache):
-    data, addr = sock.recvfrom(4096)
-    data = binascii.hexlify(data).decode("utf-8")
-    name, _ = get_name(data)
-    cached_result = get_from_cache(data, cache)
+    data, addr = sock.recvfrom(bufsize)
+    data = binascii.hexlify(data).decode(encoding)
+    resp_package = get_from_cache(data, cache)
 
-    if cached_result is None:
+    if resp_package is None:
         print('From server')
+
         data = data.replace("\n", "").replace(" ", "")
-        with socket.socket(
-                socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.settimeout(2)
-            try:
-                s.sendto(binascii.unhexlify(data), ("8.8.8.8", 53))
-                response_from_server, _ = s.recvfrom(4096)
-            except:
-                result = None
-            else:
-                package = DnsResponsePackage(response_from_server)
-                with open("parsed_responses.txt", 'a') as f:
-                    f.write(package.get_all_info())
-                    f.write('--------------------------------------')
-                cache_records(package, cache)
-                result = response_from_server
+        resp_package = get_response_from_server(data)
+        cache_records(resp_package, cache)
     else:
         print('From cash')
-        result = cached_result
-    if result is not None:
-        sock.sendto(result, addr)
+
+    if resp_package is not None:
+        save_parsed_response(resp_package)
+        resp_package.send(sock, addr)
+
+
+def get_response_from_server(data):
+    with socket.socket(
+            socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.settimeout(2)
+        try:
+            s.sendto(binascii.unhexlify(data), (server, port))
+            response_from_server, _ = s.recvfrom(bufsize)
+        except socket.timeout:
+            print(f"Can't reach server {server} while recursive request")
+        else:
+            if response_from_server is not None:
+                return DnsResponsePackage(response_from_server)
+
+
+def save_parsed_response(package: DnsResponsePackage):
+    with open("parsed_responses.txt", 'a') as f:
+        f.write(package.get_all_info())
+        f.write('--------------------------------------')
 
 
 def cache_records(package, cache):
@@ -59,47 +71,53 @@ def cache_records(package, cache):
 
 
 def get_from_cache(data, cache):
-    header, other_data_before = data[:header_len], data[header_len:]
+    header, body = data[:header_len], data[header_len:]
     name, _ = get_name(data)
-    type = other_data_before[-8: -4]
+    type = body[-byte_len*4: -byte_len*2]
 
     if (name, type) in cache:
         package: DnsResponsePackage = cache[(name, type)]
-        return binascii.unhexlify(header[:4]) + package.get_data_in_bytes()[2:]
+        package.set_ID(header[:byte_len*2])
+        return package
     return None
 
 
-def update_cache(cache : dict):
+def update_cache(cache: dict):
     keys_to_delete = []
-    for (key, value) in cache.items():
-        value.update_records()
-        recs = value.get_records()
-        if len(recs[0]) + len(recs[1]) + len(recs[2]) == 0:
+
+    for (key, resp_package) in cache.items():
+        if resp_package.has_no_records():
             keys_to_delete.append(key)
+
     for key in keys_to_delete:
         del cache[key]
 
 
+def clear_parsed_responses_file():
+    with open("parsed_responses.txt", 'w') as f:
+        f.write('')
+
+
 def run():
-    my_cache = load_cache()
+    clear_parsed_responses_file()
+    cache = load_cache()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('localhost', 53))
+    sock.bind(('localhost', port))
     print('Server launched on 127.0.0.1: 53')
 
     while True:
-        update_cache(my_cache)
+        update_cache(cache)
         try:
-            process_request(sock, my_cache)
+            process_request(sock, cache)
         except KeyboardInterrupt:
             user_answer = -1
             while user_answer != 'Y' and user_answer != 'N':
-                print('Shut down server?[Y/N]')
-                user_answer = str(input())
+                user_answer = str(input('Shut down server?[Y/N]'))
             if user_answer == 'N':
                 continue
             if user_answer == 'Y':
-                dump_cache(my_cache)
+                dump_cache(cache)
                 exit(0)
 
 

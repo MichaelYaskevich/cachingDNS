@@ -4,51 +4,50 @@ from time import time
 
 from help_methods import *
 
+byte_len = 2
+header_in_bytes_len = 12
+header_as_str_len = 24
+encoding = "utf-8"
+
 
 class DnsResponsePackage:
     def __init__(self, data_in_bytes):
         self._data_in_bytes = data_in_bytes
-        header, body = data_in_bytes[:12], data_in_bytes[12:]
-        self._header = header
-        self._body = body
+        self._data_as_str = convert_to_str(self._data_in_bytes)
+
+        header, body = data_in_bytes[:header_in_bytes_len], data_in_bytes[header_in_bytes_len:]
         unpacked_header = struct.unpack("2s2s2s2s2s2s", header)
         self._ID, self._flags, self._QDCOUNT, self._ANCOUNT, self._NSCOUNT, self._ARCOUNT = \
-            [binascii.hexlify(x).decode("utf-8") for x in unpacked_header]
+            [convert_to_str(x) for x in unpacked_header]
+
         (self._qname, self._qtype, self._qclass) = self.__unpack_question__()
-        self._records = self.__get_records__(self._data_as_str)
+        self._records = get_records(self._data_as_str)
+
+    def send(self, sock, address):
+        data_to_send = self.get_data_in_bytes()
+        if data_to_send is not None:
+            sock.sendto(data_to_send, address)
+
+    def has_no_records(self):
+        self.update_records()
+        recs = self.get_records()
+        return len(recs[0]) + len(recs[1]) + len(recs[2]) == 0
+
+    def set_ID(self, id):
+        self._data_as_str = id + self._data_as_str[byte_len*2:]
+        self._data_in_bytes = convert_to_bytes(self._data_as_str)
+        self._ID = id
 
     def __unpack_question__(self):
-        self._data_as_str = binascii.hexlify(
-            self._data_in_bytes).decode("utf-8")
-        self._header_as_str = binascii.hexlify(
-            self._header).decode("utf-8")
-        self._body_as_str = binascii.hexlify(
-            self._body).decode("utf-8")
+        body_as_str = self.get_body_as_str()
 
-        qname, offset = get_name(self._data_as_str)
-        qtype = self._body_as_str[offset: offset + 4]
-        qclass = self._body_as_str[offset + 4: offset + 8]
+        qname, off = get_name(self._data_as_str)
+        qtype = body_as_str[off: off + byte_len*2]
+        qclass = body_as_str[off + byte_len*2: off + byte_len*4]
 
-        self._question_as_str = self._body_as_str[:offset + 8]
+        self._question_as_str = body_as_str[:off + byte_len*4]
 
         return qname, qtype, qclass
-
-    def __get_records__(self, data_as_str):
-        header, body = data_as_str[:header_len], data_as_str[header_len:]
-        name, offset = get_name(data_as_str)
-        (ANCOUNT, NSCOUNT, ARCOUNT) = (
-            get_bytes_as_int(header, pos, bytes_count=2) for pos in [12, 16, 20])
-        resource_record = body[offset + 8:]
-
-        records = [[], [], []]
-        for (i, value) in enumerate([ANCOUNT, NSCOUNT, ARCOUNT]):
-            if value == 0:
-                continue
-            record_and_name = parse_record(value, data_as_str, resource_record)
-            records[i] = record_and_name
-            resource_record = resource_record[24 + int(resource_record[20:24], 16) * 2:]
-
-        return records
 
     def get_all_info(self):
         return f"ID : {self._ID}\n" \
@@ -73,9 +72,6 @@ class DnsResponsePackage:
                      f"data : {record.get_data()}"
         return s
 
-    def get_data_as_str(self):
-        return self._data_as_str
-
     def update_records(self):
         records = []
         for i in range(3):
@@ -89,17 +85,20 @@ class DnsResponsePackage:
                     records_to_delete.append(self._records[i][j])
             for rec in records_to_delete:
                 self._records[i].remove(rec)
-        self._data_as_str = self._header_as_str + self._question_as_str + ''.join(records)
-        self._data_in_bytes = binascii.unhexlify(self._data_as_str)
+        self._data_as_str = self.get_header_as_str() + self._question_as_str + ''.join(records)
+        self._data_in_bytes = convert_to_bytes(self._data_as_str)
+
+    def get_data_as_str(self):
+        return self._data_as_str
 
     def get_data_in_bytes(self):
         return self._data_in_bytes
 
     def get_header_as_str(self):
-        return self._header_as_str
+        return self._data_as_str[:24]
 
     def get_body_as_str(self):
-        return self._data_as_str[:24]
+        return self._data_as_str[24:]
 
     def get_ID(self):
         return self._ID
@@ -130,3 +129,36 @@ class DnsResponsePackage:
 
     def get_records(self):
         return self._records
+
+
+def convert_to_str(bytes):
+    return binascii.hexlify(bytes).decode(encoding)
+
+
+def convert_to_bytes(str):
+    return binascii.unhexlify(str)
+
+
+def get_records(data_as_str):
+    header, body = data_as_str[:header_as_str_len], data_as_str[header_as_str_len:]
+    name, offset = get_name(data_as_str)
+    (ANCOUNT, NSCOUNT, ARCOUNT) = (
+        get_bytes_as_int(header, pos, bytes_count=2) for pos in [12, 16, 20])
+    resource_record = body[offset + byte_len * 4:]
+
+    records = [[], [], []]
+    for (i, value) in enumerate([ANCOUNT, NSCOUNT, ARCOUNT]):
+        if value == 0:
+            continue
+        record_and_name = parse_record(value, data_as_str, resource_record)
+        records[i] = record_and_name
+        resource_record = get_next_record(resource_record)
+
+    return records
+
+
+def get_next_record(resource_record):
+    data_len_start = 10 * byte_len
+    data_len = get_bytes_as_int(resource_record, data_len_start, bytes_count=2)
+    end_of_record = data_len_start + byte_len * 2 + data_len * byte_len
+    return resource_record[end_of_record:]

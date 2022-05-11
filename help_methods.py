@@ -30,8 +30,8 @@ def get_name(data, start_from=24):
     return name, offset
 
 
-def get_part_name(data, chunks, name):
-    start_from = int(bin(chunks)[2:], 2) * 2
+def get_part_name(data, label_length, name):
+    start_from = int(bin(label_length)[2:], 2) * 2
     part_name, offset = get_name(data, start_from)
     if name == "":
         name += part_name
